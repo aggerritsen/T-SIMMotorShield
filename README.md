@@ -24,7 +24,7 @@ This project was developed and tested on a **custom PCB** that integrates:
 * Dedicated motor connectors
 * Common ground and power routing for VM / VCC
 
-![Custom Motor Shield PCB](pcb\PCB-SM-DCM.jpg)
+![Custom Motor Shield PCB](pcb/PCB-SM-DCM.jpg)
 
 ---
 
