@@ -8,10 +8,12 @@ The focus of this development is hardware correctness and repeatability, not app
 
 The same firmware can operate the TB6612FNG in **two distinct roles**, selected at compile time:
 
-* **Stepper mode** – drive a 28BYJ-48 as a *bipolar (2‑coil) stepper* with the red wire disconnected
+* **Stepper mode** – drive a 28BYJ-48 as a *bipolar (2-coil) stepper* with the red wire disconnected
 * **DC motor mode** – drive **two independent DC motors** (Motor A and Motor B)
 
-The goal of this project is to provide a **clear, hardware-faithful reference** for testing motors, wiring, PWM behavior, and direction control on ESP32‑S3 hardware.
+In addition, two GPIOs (**D0** and **D1**) are reserved for **status LEDs** provided a GPIO Grove connector, supplying access to D0/D1 and D1/D2 for additional purposes.
+
+The goal of this project is to provide a **clear, hardware-faithful reference** for testing motors, wiring, PWM behavior, direction control, and basic runtime liveness on ESP32-S3 hardware.
 
 ---
 
@@ -30,15 +32,15 @@ This project was developed and tested on a **custom PCB** that integrates:
 
 ## Hardware
 
-* **MCU:** Seeed XIAO ESP32‑S3 (or compatible ESP32‑S3 board)
-* **Motor driver:** TB6612FNG dual H‑bridge
-* **Motor option A:** 28BYJ‑48 stepper wired in bipolar-like mode
+* **MCU:** Seeed XIAO ESP32-S3 (or compatible ESP32-S3 board)
+* **Motor driver:** TB6612FNG dual H-bridge
+* **Motor option A:** 28BYJ-48 stepper wired in bipolar-like mode
 * **Motor option B:** Two DC motors
 
 ### Power notes
 
 * **VM (motor supply):** connect to your motor supply (commonly 5 V for small motors)
-* **VCC (logic):** 3.3 V from the ESP32‑S3
+* **VCC (logic):** 3.3 V from the ESP32-S3
 * **GND:** all grounds must be common
 * **STBY:** assumed **wired to 3.3 V** (driver always enabled)
 
@@ -56,16 +58,43 @@ Mode is selected at compile time in `src/main.cpp`:
 
 * **MODE_STEPPER**
 
-  * Runs a 28BYJ‑48 as a 2‑coil stepper at a fixed speed
+  * Runs a 28BYJ-48 as a 2-coil stepper at a fixed speed
 * **MODE_DC**
 
   * Turns the TB6612FNG into a dual DC motor driver controlled via Serial
 
 ---
 
-## TB6612FNG pinout (ESP32‑S3 GPIO)
+## Status LEDs (D0 / D1)
 
-| TB6612FNG pin | Function           | ESP32‑S3 GPIO  |
+Two GPIOs are intentionally reserved for additional purposes;
+
+| Signal | Board pin | Description         |
+| -----: | --------- | ------------------- |
+|   LED0 | D0        | Heartbeat indicator |
+|   LED1 | D1        | Inverted heartbeat  |
+
+### LED behavior
+
+* D0 and D1 blink **alternately** (one on, one off)
+* Blink timing is fixed in firmware (≈250 ms)
+* LED updates are non-blocking and continue:
+
+  * while the stepper motor is running
+  * while DC motors are active
+  * inside timing loops and delays
+
+This provides an immediate visual indication that:
+
+* the MCU has booted correctly
+* the main loop is alive
+* timing-sensitive motor control code is not stalling execution
+
+---
+
+## TB6612FNG pinout (ESP32-S3 GPIO)
+
+| TB6612FNG pin | Function           | ESP32-S3 GPIO  |
 | ------------- | ------------------ | -------------- |
 | PWMA          | PWM speed Bridge A | GPIO 9         |
 | AIN1          | Direction A        | GPIO 11        |
@@ -78,13 +107,13 @@ Mode is selected at compile time in `src/main.cpp`:
 PWM is generated using **ESP32 LEDC**:
 
 * Frequency: **20 kHz** (quiet)
-* Resolution: **8‑bit** (0…255)
+* Resolution: **8-bit** (0…255)
 
 ---
 
-## 28BYJ‑48 “bipolar” mode (red disconnected)
+## 28BYJ-48 “bipolar” mode (red disconnected)
 
-The classic **28BYJ‑48** is a 5‑wire *unipolar* stepper motor. To use it with an H‑bridge:
+The classic **28BYJ-48** is a 5-wire *unipolar* stepper motor. To use it with an H-bridge:
 
 1. **Disconnect the red wire** (do not connect it to VM, VCC, or GND)
 2. Use the remaining four wires as **two independent coils**
@@ -118,7 +147,7 @@ The classic **28BYJ‑48** is a 5‑wire *unipolar* stepper motor. To use it wit
 
 ## Recommended stepper speed range
 
-Based on testing with the 28BYJ‑48:
+Based on testing with the 28BYJ-48:
 
 * **Best torque:** 200–400 steps/s
 * Above ~400 steps/s the motor tends to **slip or lose torque**
@@ -127,7 +156,7 @@ Based on testing with the 28BYJ‑48:
 
 ## Stepper mode behavior
 
-Stepper mode uses **full‑step, 2‑phase‑ON driving**.
+Stepper mode uses **full-step, 2-phase-ON driving**.
 
 ### Step sequence (A, B)
 
@@ -195,12 +224,12 @@ From testing:
 
 ## PWM limits (why 255 is the max)
 
-The sketch uses **8‑bit PWM**:
+The sketch uses **8-bit PWM**:
 
 * Duty range: `0…255`
 * `255` = **100% ON**
 
-Increasing PWM resolution (e.g. 10‑bit → 0…1023) gives *finer control*, but **does not exceed 100% duty**.
+Increasing PWM resolution (e.g. 10-bit → 0…1023) gives *finer control*, but **does not exceed 100% duty**.
 
 To increase torque beyond this, hardware changes are required:
 
@@ -228,8 +257,8 @@ To increase torque beyond this, hardware changes are required:
 This project is intended as a **clean, repeatable test harness** for:
 
 * TB6612FNG direction logic
-* ESP32‑S3 LEDC PWM behavior
-* 28BYJ‑48 bipolar conversion
+* ESP32-S3 LEDC PWM behavior
+* 28BYJ-48 bipolar conversion
 * Dual DC motor control
 
-It is well suited for bring‑up, custom PCB validation, and motor experiments before integrating into larger systems.
+It is well suited for bring-up, custom PCB validation, and motor experiments before integrating into larger systems.

@@ -8,14 +8,84 @@
 #define MODE MODE_STEPPER
 // =======================================================
 
-// ===== TB6612FNG pin map (ESP32-S3 GPIO numbers) =====
+// ===================== GPIO CONFIG (from platformio.ini) =====================
+// Your platformio.ini provides pin mapping via build flags like:
+//   -DD0_GPIO_CFG=3
+//   -DD1_GPIO_CFG=46
+//   -DD2_GPIO_CFG=9  ... -DD7_GPIO_CFG=14
+//
+// We consume those macros here. If a macro is missing, we fall back to a sane default.
+// ============================================================================
+
+// Status LEDs
+#ifndef D0_GPIO_CFG
+  #define D0_GPIO_CFG 3
+#endif
+#ifndef D1_GPIO_CFG
+  #define D1_GPIO_CFG 46
+#endif
+
+static const int PIN_LED0 = (int)D0_GPIO_CFG;
+static const int PIN_LED1 = (int)D1_GPIO_CFG;
+
+// TB6612FNG pin map (defaults match your t-sim7080g-s3 config)
+#ifndef D2_GPIO_CFG
+  #define D2_GPIO_CFG 9
+#endif
+#ifndef D3_GPIO_CFG
+  #define D3_GPIO_CFG 10
+#endif
+#ifndef D4_GPIO_CFG
+  #define D4_GPIO_CFG 11
+#endif
+#ifndef D5_GPIO_CFG
+  #define D5_GPIO_CFG 12
+#endif
+#ifndef D6_GPIO_CFG
+  #define D6_GPIO_CFG 13
+#endif
+#ifndef D7_GPIO_CFG
+  #define D7_GPIO_CFG 14
+#endif
+
+// ===== TB6612FNG pin map (ESP32 / ESP32-S3 GPIO numbers) =====
 // STBY is wired to 3V3 (always enabled)
-static const int PIN_PWMA = 9;    // GPIO09
-static const int PIN_AIN2 = 10;   // GPIO10
-static const int PIN_AIN1 = 11;   // GPIO11
-static const int PIN_BIN2 = 12;   // GPIO12
-static const int PIN_BIN1 = 13;   // GPIO13
-static const int PIN_PWMB = 14;   // GPIO14
+static const int PIN_PWMA = (int)D2_GPIO_CFG;   // default 9
+static const int PIN_AIN2 = (int)D3_GPIO_CFG;   // default 10
+static const int PIN_AIN1 = (int)D4_GPIO_CFG;   // default 11
+static const int PIN_BIN2 = (int)D5_GPIO_CFG;   // default 12
+static const int PIN_BIN1 = (int)D6_GPIO_CFG;   // default 13
+static const int PIN_PWMB = (int)D7_GPIO_CFG;   // default 14
+
+// ===================== STATUS LED HEARTBEAT =====================
+static const uint32_t LED_BLINK_MS = 250; // matches your documentation
+static uint32_t g_ledNextMs = 0;
+static bool g_ledPhase = false;
+
+static inline void ledsInit()
+{
+  pinMode(PIN_LED0, OUTPUT);
+  pinMode(PIN_LED1, OUTPUT);
+
+  digitalWrite(PIN_LED0, LOW);
+  digitalWrite(PIN_LED1, LOW);
+
+  g_ledPhase = false;
+  g_ledNextMs = millis() + LED_BLINK_MS;
+}
+
+static inline void ledsTask()
+{
+  uint32_t now = millis();
+  if ((int32_t)(now - g_ledNextMs) < 0) return;
+
+  g_ledNextMs += LED_BLINK_MS;
+  g_ledPhase = !g_ledPhase;
+
+  // Alternate blink: LED0 on while LED1 off, then swap
+  digitalWrite(PIN_LED0, g_ledPhase ? HIGH : LOW);
+  digitalWrite(PIN_LED1, g_ledPhase ? LOW  : HIGH);
+}
 
 // ===================== PWM (ESP32 LEDC) =====================
 static const int PWM_FREQ_HZ = 20000;    // 20 kHz (quiet)
@@ -134,6 +204,9 @@ static bool readLine(String &line)
 
 static void handleSerialDC()
 {
+  // Keep LEDs blinking even when idle in DC mode
+  ledsTask();
+
   String line;
   if (!readLine(line)) return;
 
@@ -231,12 +304,17 @@ static inline void applyPhase(uint8_t idx) {
 
 static inline void waitUntil(uint32_t targetUs) {
   while ((int32_t)(micros() - targetUs) < 0) {
+    // allow background tasks + keep LED blink alive even during tight stepping waits
+    ledsTask();
     delay(0);
   }
 }
 
 static void handleSerialStepper()
 {
+  // also blink during serial handling
+  ledsTask();
+
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == 'a' || c == 'A') {
@@ -270,6 +348,7 @@ static void runFixedForMs(bool forward, uint32_t runMs) {
     applyPhase(phase);
 
     handleSerialStepper();
+    ledsTask();
   }
 }
 
@@ -282,6 +361,9 @@ void setup()
 {
   Serial.begin(115200);
   delay(1500);
+
+  // LEDs on D0/D1 (as defined by build flags D0_GPIO_CFG/D1_GPIO_CFG)
+  ledsInit();
 
   pinMode(PIN_AIN1, OUTPUT);
   pinMode(PIN_AIN2, OUTPUT);
@@ -320,16 +402,25 @@ void setup()
 
 void loop()
 {
+  // Always keep LEDs blinking
+  ledsTask();
+
 #if MODE == MODE_STEPPER
   Serial.println("Forward...");
   runFixedForMs(true, RUN_DIR_MS);
   stepperCoast();
-  delay(COAST_MS);
+
+  // blink-friendly delay
+  uint32_t tEnd1 = millis() + COAST_MS;
+  while ((int32_t)(millis() - tEnd1) < 0) { ledsTask(); delay(1); }
 
   Serial.println("Reverse...");
   runFixedForMs(false, RUN_DIR_MS);
   stepperCoast();
-  delay(COAST_MS);
+
+  // blink-friendly delay
+  uint32_t tEnd2 = millis() + COAST_MS;
+  while ((int32_t)(millis() - tEnd2) < 0) { ledsTask(); delay(1); }
 
 #elif MODE == MODE_DC
   handleSerialDC();
