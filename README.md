@@ -25,8 +25,7 @@ This project was developed and tested on a **custom PCB** that integrates:
 * TB6612FNG motor driver
 * Dedicated motor connectors
 * Common ground and power routing for VM / VCC
-* 5-pin connector (JST-XH, RM2.5) for steppermotor like 28BYJ-48
-* 2 times 2-pin connector (JST-PH, RM2.0) for DC motors
+
 
 ![Custom Motor Shield PCB](pcb/PCB-SM-DCM.jpg)
 
@@ -40,6 +39,15 @@ This project was developed and tested on a **custom PCB** that integrates:
 * **Motor option B:** Two DC motors
 * **Pull-down resistors I2C:** 2x 4k7 (optional)
 * **Pull-up resistor STBY:** 1x 10k (mandatory)
+* **5-pin connector:** 1x JST-XH, RM2,5mm for steppermotor like 28BYJ-48
+* **2-pin connector:** 2x JST-PH, RM2,0mm for DC motors
+* **Jumper:** Jumper Cap 2 Pins 2,54mm (VMOT selector)
+
+|Jumper |VMotor (VMOT)|
+|---|---|
+| 1-2 | 3V3 from T-SIM|
+| 2-3 | DC5/VBAT from T-SIM|
+| none | External power (screw connector EXT)|
 
 ### Power notes
 
