@@ -1,211 +1,235 @@
-# T-SIM Relay shield (ESP32 / ESP32-S3)
+# T-SIM Motor shield (ESP32 / ESP32-S3)
 
-This repository contains a **clean, deterministic GPIO + I2C baseline** used to validate pinout consistency and external bus behavior across **LilyGO T-SIM boards** when used with a **generic T-SIM Relay Shield**.
+This repository contains a clean, deterministic GPIO + I2C baseline used to validate pinout consistency and external bus behavior across LilyGO T-SIM boards when used with a generic **T-SIM Motor driver Shield**, to be used by either a Stepper Motor or two DC motors using the **TB6612FNG** Motor Driver.
 
 The shield also provides a male header connector for the XIAO slot of the Seeed Grove Vision AI V2 board.
 
-The focus of this development is **hardware correctness and repeatability**, not application logic.
-It provides a proven foundation for later integration of actuators (relays, DC or stepper motors) and external I2C peripherals (sensors, expanders, AI modules).
+The focus of this development is hardware correctness and repeatability, not application logic. It provides a proven foundation for later integration of actuators (relays, DC or stepper motors) and external I2C peripherals (sensors, expanders, AI modules).
 
-This baseline deliberately **excludes UART and transport logic**. USB Serial is used **only for logging**.
+The same firmware can operate the TB6612FNG in **two distinct roles**, selected at compile time:
 
----
+* **Stepper mode** – drive a 28BYJ-48 as a *bipolar (2‑coil) stepper* with the red wire disconnected
+* **DC motor mode** – drive **two independent DC motors** (Motor A and Motor B)
 
-## Printer Circuit Board (PCB)
-
-A Fritzing file (`.fzz`) is available to order the PCB at a manufacturer of choice.
+The goal of this project is to provide a **clear, hardware-faithful reference** for testing motors, wiring, PWM behavior, and direction control on ESP32‑S3 hardware.
 
 ---
 
-## Goals of This Development
+## Custom development PCB
 
-This project exists to answer these questions conclusively:
+This project was developed and tested on a **custom PCB** that integrates:
 
-* Are GPIO pins wired correctly across all supported boards?
-* Is GPIO output behavior consistent (timing, drive, polarity)?
-* Is external **I2C-1** stable at **400 kHz** on all boards?
-* Can the same Grove / relay / motor / sensor shields be reused across boards?
+* Seeed XIAO ESP32-S3
+* TB6612FNG motor driver
+* Dedicated motor connectors
+* Common ground and power routing for VM / VCC
 
-Example shield:
-
-![PCB Relay Shield](pcb/PCB-RLY.jpg)
-
+![Custom Motor Shield PCB](pcb\PCB-SM-DCM.jpg)
 
 ---
 
-## Design Principles
+## Hardware
 
-* **GPIO output test for D0 and D1**
-* **I2C-1 only** (I2C-0 remains free for internal / onboard use)
-* **Non-blocking design** (watchdog-safe)
-* **Identical firmware across all boards**
-* Board differences handled **only via PlatformIO build flags**
+* **MCU:** Seeed XIAO ESP32‑S3 (or compatible ESP32‑S3 board)
+* **Motor driver:** TB6612FNG dual H‑bridge
+* **Motor option A:** 28BYJ‑48 stepper wired in bipolar-like mode
+* **Motor option B:** Two DC motors
 
----
+### Power notes
 
-## What the Firmware Does
-
-### GPIO Test (D0 / D1 only)
-
-* Uses **two output pins**: `D0` and `D1`
-* Alternating pattern ("walking 1"):
-
-  * D0 HIGH, D1 LOW
-  * D0 LOW, D1 HIGH
-* Interval configurable via `GPIO_TEST_INTERVAL_MS_CFG` (default: 200 ms)
-* Non-blocking (`millis()` based)
-
-This validates:
-
-* Correct GPIO mapping
-* Output drive capability
-* Timing stability
-
-### I2C-1 Scan (external bus)
-
-* Uses **I2C bus 1** (`TwoWire(1)`)
-* SDA / SCL pins defined per board via build flags
-* Frequency: **400 kHz** (configurable)
-* Scan starts **after each full D0 → D1 GPIO cycle**
-* Scan is **incremental**:
-
-  * Exactly **one I2C address per loop iteration**
-  * Fully watchdog-safe
-
-Scan output is printed to USB Serial.
+* **VM (motor supply):** connect to your motor supply (commonly 5 V for small motors)
+* **VCC (logic):** 3.3 V from the ESP32‑S3
+* **GND:** all grounds must be common
+* **STBY:** assumed **wired to 3.3 V** (driver always enabled)
 
 ---
 
-## Supported Boards (current & verified)
+## Mode selection
 
-| Board         | MCU        | Status     |
-| ------------- | ---------- | ---------- |
-| XIAO ESP32-S3 | ESP32-S3   | ✅ Verified |
-| T-SIM7080G-S3 | ESP32-S3   | ✅ Verified |
-| T-SIM7070     | ESP32      | ✅ Verified |
-| T-SIM7000G    | ESP32      | ✅ Verified |
-| T-SIM7600     | ESP32 / S3 | 🔜 Planned |
-| T-SIM7670G-S3 | ESP32-S3   | 🔜 Planned |
+Mode is selected at compile time in `src/main.cpp`:
 
-All verified boards run **the exact same firmware source**, differing only by PlatformIO environment configuration.
-
----
-
-## Pin Configuration
-
-### T-SIM7080G-S3 (ESP32-S3)
-
-| Signal | GPIO   | Notes            |
-| ------ | ------ | ---------------- |
-| 3V3    | —      | (P1.1)           |
-| GND    | —      | (P1.2)           |
-| SDA    | GPIO16 | I2C-1 (P1.3)     |
-| SCL    | GPIO17 | I2C-1 (P1.4)     |
-| D0     | GPIO03 | GPIO test output |
-| D1     | GPIO46 | GPIO test output |
-
-### T-SIM7000G / T-SIM7070 / T-SIM7600 / T-SIM7670G (ESP32 classic / S3)
-
-| Signal | GPIO   | Notes            |
-| ------ | ------ | ---------------- |
-| 3V3    | —      | (P1.1)           |
-| GND    | —      | (P1.2)           |
-| SDA    | GPIO32 | I2C-1 (P1.3)     |
-| SCL    | GPIO33 | I2C-1 (P1.4)     |
-| D0     | GPIO26 | GPIO test output |
-| D1     | GPIO25 | GPIO test output |
-
-> Pins D2–D7 are intentionally **unused** in this baseline.
-
----
-
-## Architecture Overview
-
-```
-+---------------------------+
-| ESP32 / ESP32-S3 Board    |
-|                           |
-|  D0 / D1  ---> GPIO test  |
-|  I2C-1    ---> Grove bus  |
-|                           |
-|  USB Serial (logs only)   |
-+---------------------------+
+```cpp
+#define MODE_STEPPER 1
+#define MODE_DC      2
+#define MODE MODE_STEPPER   // change to MODE_DC for DC motor mode
 ```
 
----
+* **MODE_STEPPER**
 
-## Logging
+  * Runs a 28BYJ‑48 as a 2‑coil stepper at a fixed speed
+* **MODE_DC**
 
-All activity is logged via **USB Serial**:
-
-```
-[      4123] GPIO D0 HIGH
-[      4323] GPIO D1 HIGH
-=======================================
- I2C-1 SCAN START (after GPIO cycle)
-=======================================
-  ✓ I2C device found at 0x3C
-  Total devices: 1
-  Scan duration: 128 ms
-```
-
-Logging includes:
-
-* GPIO state transitions
-* I2C scan start / completion
-* Detected I2C device addresses
-* Scan duration
+  * Turns the TB6612FNG into a dual DC motor driver controlled via Serial
 
 ---
 
-## PlatformIO Usage
+## TB6612FNG pinout (ESP32‑S3 GPIO)
 
-### Upload (example)
+| TB6612FNG pin | Function           | ESP32‑S3 GPIO  |
+| ------------- | ------------------ | -------------- |
+| PWMA          | PWM speed Bridge A | GPIO 9         |
+| AIN1          | Direction A        | GPIO 11        |
+| AIN2          | Direction A        | GPIO 10        |
+| PWMB          | PWM speed Bridge B | GPIO 14        |
+| BIN1          | Direction B        | GPIO 13        |
+| BIN2          | Direction B        | GPIO 12        |
+| STBY          | Enable             | Wired to 3.3 V |
 
-```ini
-upload_port  = COM3
-monitor_port = COM3
-monitor_speed = 115200
-```
+PWM is generated using **ESP32 LEDC**:
 
-### Build & upload
-
-```bash
-pio run -e t-sim7080g-s3 -t upload
-```
-
-### Monitor
-
-```bash
-pio device monitor
-```
+* Frequency: **20 kHz** (quiet)
+* Resolution: **8‑bit** (0…255)
 
 ---
 
-## What This Code Is (and Is Not)
+## 28BYJ‑48 “bipolar” mode (red disconnected)
 
-### ✅ This is
+The classic **28BYJ‑48** is a 5‑wire *unipolar* stepper motor. To use it with an H‑bridge:
 
-* A GPIO and I2C validation harness
-* A cross-board hardware sanity check
-* A deterministic, watchdog-safe baseline
-* Safe to extend with actuators or sensors
+1. **Disconnect the red wire** (do not connect it to VM, VCC, or GND)
+2. Use the remaining four wires as **two independent coils**
+3. Drive each coil with one TB6612FNG bridge
 
-### ❌ This is not
+### Confirmed working coil pairing
 
-* A transport or UART test
-* A communication protocol
-* Optimized for throughput
-* Tied to AI, camera, or application logic
+| Bridge | Coil wires    |
+| ------ | ------------- |
+| A      | Orange + Pink |
+| B      | Yellow + Blue |
+
+* Red wire: **disconnected**
+* This pairing provided **strong torque in both directions** during testing
 
 ---
 
-## Status
+## Wiring table (reference)
 
-✅ **GPIO and I2C behavior proven stable across multiple boards**
+| Connector | Color  | Winding | Channel | Pin |
+| --------: | ------ | ------- | ------- | --- |
+|         X | Red    | –       | –       | –   |
+|         A | Orange | A1      | CH1 (−) | P4  |
+|         B | Yellow | B1      | CH2 (−) | P6  |
+|         C | Pink   | A2      | CH1 (+) | P5  |
+|         D | Blue   | B2      | CH2 (+) | P7  |
 
-This repository represents a known-good, cross-board baseline for:
+> **Note:** Swapping the two wires of *one* bridge simply flips the direction of that coil.
 
-* GPIO output validation (D0 / D1)
-* External I2C-1 scanning at 400 kHz
-* Reusable Grove-based hardware development
+---
+
+## Recommended stepper speed range
+
+Based on testing with the 28BYJ‑48:
+
+* **Best torque:** 200–400 steps/s
+* Above ~400 steps/s the motor tends to **slip or lose torque**
+
+---
+
+## Stepper mode behavior
+
+Stepper mode uses **full‑step, 2‑phase‑ON driving**.
+
+### Step sequence (A, B)
+
+1. A+, B+
+2. A−, B+
+3. A−, B−
+4. A+, B−
+
+### Implementation details
+
+* Fixed speed via `FIXED_STEPS_PER_SEC` (default: **400**)
+* Direction alternates automatically:
+
+  * Forward for `RUN_DIR_MS`
+  * Short coast (`COAST_MS`)
+  * Reverse for `RUN_DIR_MS`
+
+---
+
+## Stepper mode serial controls
+
+While the stepper is running, you can adjust coil polarity in software:
+
+* **`a`** → toggle `FLIP_COIL_A`
+* **`b`** → toggle `FLIP_COIL_B`
+* **`r`** → reset both flips
+
+This is useful if the motor runs backwards or stepping feels rough after rewiring.
+
+---
+
+## DC motor mode behavior
+
+In DC mode, the TB6612FNG is used as **two independent DC motor channels**:
+
+* **Motor A:** AIN1 / AIN2 + PWMA
+* **Motor B:** BIN1 / BIN2 + PWMB
+
+---
+
+## DC mode serial commands
+
+Open the Serial Monitor at **115200 baud**, newline enabled.
+
+Commands:
+
+* `A <speed>` → Motor A speed (**−255 … 255**)
+
+  * `A 200`  → forward
+  * `A -150` → reverse
+* `B <speed>` → Motor B speed (**−255 … 255**)
+* `S` → stop both motors
+* `H` → print help
+
+---
+
+## Recommended DC operating range
+
+From testing:
+
+* **Best torque band:** PWM duty **150–255**
+* Below ~120 duty, torque is typically insufficient
+
+---
+
+## PWM limits (why 255 is the max)
+
+The sketch uses **8‑bit PWM**:
+
+* Duty range: `0…255`
+* `255` = **100% ON**
+
+Increasing PWM resolution (e.g. 10‑bit → 0…1023) gives *finer control*, but **does not exceed 100% duty**.
+
+To increase torque beyond this, hardware changes are required:
+
+* Higher motor supply voltage (within motor/driver specs)
+* Higher current capability
+* Different motor or gear ratio
+
+---
+
+## Quick start
+
+1. Wire TB6612FNG power: **VM, VCC, GND, STBY**
+2. Choose motor wiring:
+
+   * **Stepper:** Orange+Pink → Bridge A, Yellow+Blue → Bridge B, red disconnected
+   * **DC:** Motor A → A01/A02, Motor B → B01/B02
+3. Select mode in `src/main.cpp`
+4. Build and flash
+5. Open Serial Monitor at **115200**
+
+---
+
+## Summary
+
+This project is intended as a **clean, repeatable test harness** for:
+
+* TB6612FNG direction logic
+* ESP32‑S3 LEDC PWM behavior
+* 28BYJ‑48 bipolar conversion
+* Dual DC motor control
+
+It is well suited for bring‑up, custom PCB validation, and motor experiments before integrating into larger systems.
