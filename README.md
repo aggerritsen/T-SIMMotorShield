@@ -25,6 +25,8 @@ This project was developed and tested on a **custom PCB** that integrates:
 * TB6612FNG motor driver
 * Dedicated motor connectors
 * Common ground and power routing for VM / VCC
+* 5-pin connector (JST-XH, RM2.5) for steppermotor like 28BYJ-48
+* 2 times 2-pin connector (JST-PH, RM2.0) for DC motors
 
 ![Custom Motor Shield PCB](pcb/PCB-SM-DCM.jpg)
 
