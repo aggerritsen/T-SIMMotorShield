@@ -38,6 +38,8 @@ This project was developed and tested on a **custom PCB** that integrates:
 * **Motor driver:** TB6612FNG dual H-bridge
 * **Motor option A:** 28BYJ-48 stepper wired in bipolar-like mode
 * **Motor option B:** Two DC motors
+* **Pull-down resistors I2C:** 2x 4k7 (optional)
+* **Pull-up resistor STBY:** 1x 10k (mandatory)
 
 ### Power notes
 
