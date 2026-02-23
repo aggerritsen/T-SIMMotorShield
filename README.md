@@ -6,7 +6,7 @@ The shield also provides a male header connector for the XIAO slot of the Seeed 
 
 The focus of this development is hardware correctness and repeatability, not application logic. It provides a proven foundation for later integration of actuators (relays, DC or stepper motors) and external I2C peripherals (sensors, expanders, AI modules).
 
-The same firmware can operate the TB6612FNG in **two distinct roles**, selected at compile time:
+The same firmware can operate the TB6612FNG in **two distinct roles**, selected at runtime over Serial:
 
 * **Stepper mode** – drive a 28BYJ-48 as a *bipolar (2-coil) stepper* with the red wire disconnected
 * **DC motor mode** – drive **two independent DC motors** (Motor A and Motor B)
@@ -39,14 +39,15 @@ Build version:
 
 ---
 
-## Hardware
+## Bill of material
 
 * **MCU:** Seeed XIAO ESP32-S3 (or compatible ESP32-S3 board)
-* **Motor driver:** TB6612FNG dual H-bridge
+* **Motor driver:** TB6612FNG dual H-bridge module
 * **Motor option A:** 28BYJ-48 stepper wired in bipolar-like mode
 * **Motor option B:** Two DC motors
 * **Pull-down resistors I2C:** 2x 4k7 (optional)
 * **Pull-up resistor STBY:** 1x 10k (mandatory)
+* **Electrolytic capacitor:** 10 µF/16 volt (or higher voltage depeniding on EXT power)
 * **5-pin connector:** 1x JST-XH, RM2,5mm for steppermotor like 28BYJ-48
 * **2-pin connector:** 2x JST-PH, RM2,0mm for DC motors
 * **Jumper:** Jumper Cap 2 Pins 2,54mm (VMOT selector)
@@ -79,20 +80,11 @@ In this example the motor is set to use 3V3 power from the T-SIM7xxxx board.
 
 ## Mode selection
 
-Mode is selected at compile time in `src/main.cpp`:
+Mode is selected at runtime over Serial:
 
-```cpp
-#define MODE_STEPPER 1
-#define MODE_DC      2
-#define MODE MODE_STEPPER   // change to MODE_DC for DC motor mode
-```
-
-* **MODE_STEPPER**
-
-  * Runs a 28BYJ-48 as a 2-coil stepper at a fixed speed
-* **MODE_DC**
-
-  * Turns the TB6612FNG into a dual DC motor driver controlled via Serial
+* After boot, the firmware waits **2.5 seconds** before asking
+* It then **prompts every 10 seconds** until a valid input is received
+* Send **`S`** for stepper mode or **`D`** for DC motor mode
 
 ---
 
@@ -231,6 +223,7 @@ In DC mode, the TB6612FNG is used as **two independent DC motor channels**:
 ## DC mode serial commands
 
 Open the Serial Monitor at **115200 baud**, newline enabled.
+If mode was not selected yet, send **`D`** to enter DC mode (the prompt repeats every 10 seconds after the initial 2.5 second wait).
 
 Commands:
 
@@ -277,9 +270,9 @@ To increase torque beyond this, hardware changes are required:
 
    * **Stepper:** Orange+Pink → Bridge A, Yellow+Blue → Bridge B, red disconnected
    * **DC:** Motor A → A01/A02, Motor B → B01/B02
-3. Select mode in `src/main.cpp`
-4. Build and flash
-5. Open Serial Monitor at **115200**
+3. Build and flash
+4. Open Serial Monitor at **115200**
+5. Select mode over Serial (`S` for stepper, `D` for DC)
 
 ---
 

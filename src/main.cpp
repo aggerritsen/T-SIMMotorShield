@@ -3,7 +3,7 @@
 
 #define MODE_STEPPER 1
 #define MODE_DC      2
-#define MODE STEPPER
+#define MODE_UNSET   0
 
 #ifndef D0_GPIO_CFG
   #define D0_GPIO_CFG 3
@@ -89,6 +89,9 @@ static uint32_t g_ledNextMs = 0;
 static uint8_t  g_ledIdx = 0;
 static bool     g_ledCycleWrap = false;
 
+static void printHelp();
+static uint8_t g_mode = MODE_UNSET;
+
 static inline void gpio_write_safe(int pin, uint8_t level)
 {
   if (pin < 0) return;
@@ -158,6 +161,10 @@ static void i2c1_scan_tick()
     Serial.printf("  Scan duration: %lu ms\n", (unsigned long)dur);
 
     i2c_scan_runs++;
+    if (i2c_scan_runs >= I2C_SCAN_RUNS_MAX && g_mode == MODE_DC) {
+      printHelp();
+    }
+
     i2c_scan_active = false;
     return;
   }
@@ -227,8 +234,6 @@ static inline void coastA() { digitalWrite(PIN_AIN1, LOW); digitalWrite(PIN_AIN2
 static inline void coastB() { digitalWrite(PIN_BIN1, LOW); digitalWrite(PIN_BIN2, LOW); }
 static inline void brakeA() { digitalWrite(PIN_AIN1, HIGH); digitalWrite(PIN_AIN2, HIGH); }
 static inline void brakeB() { digitalWrite(PIN_BIN1, HIGH); digitalWrite(PIN_BIN2, HIGH); }
-
-#if MODE == MODE_DC
 
 static void setMotorA(int speed)
 {
@@ -311,10 +316,6 @@ static void handleSerialDC()
   Serial.println("Unknown command. Send 'H' for help.");
 }
 
-#endif
-
-#if MODE == MODE_STEPPER
-
 static const float    FIXED_STEPS_PER_SEC = 400.0f;
 static const uint32_t PERIOD_US = (uint32_t)(1000000.0f / FIXED_STEPS_PER_SEC);
 
@@ -390,12 +391,47 @@ static void runFixedForMs(bool forward, uint32_t runMs) {
   }
 }
 
-#endif
+static void printModePrompt()
+{
+  Serial.println();
+  Serial.println("Select mode: [D]C or [S]tepper");
+  Serial.println("Waiting for valid input...");
+}
+
+static uint8_t readModeSelection()
+{
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\r' || c == '\n') continue;
+    if (c == 'D' || c == 'd') return MODE_DC;
+    if (c == 'S' || c == 's') return MODE_STEPPER;
+  }
+  return MODE_UNSET;
+}
+
+static void waitForModeSelection()
+{
+  const uint32_t promptIntervalMs = 10000;
+  uint32_t nextPromptMs = millis() + promptIntervalMs;
+
+  while (g_mode == MODE_UNSET) {
+    uint8_t sel = readModeSelection();
+    if (sel != MODE_UNSET) { g_mode = sel; break; }
+
+    uint32_t now = millis();
+    if ((int32_t)(now - nextPromptMs) >= 0) {
+      nextPromptMs += promptIntervalMs;
+      printModePrompt();
+    }
+    bgTask();
+    delay(5);
+  }
+}
 
 void setup()
 {
   Serial.begin(115200);
-  delay(1500);
+  delay(2500);
 
   Serial.println();
   Serial.println("=======================================");
@@ -416,50 +452,51 @@ void setup()
   blink_init();
   i2c1_init_once();
 
-#if MODE == MODE_STEPPER
-  pwmWriteA(255);
-  pwmWriteB(255);
+  printModePrompt();
+  waitForModeSelection();
 
-  stepperCoast();
+  if (g_mode == MODE_STEPPER) {
+    pwmWriteA(255);
+    pwmWriteB(255);
 
-  Serial.println();
-  Serial.println("=== TB6612FNG STEPPER mode ===");
-  Serial.println("Wiring: A=Orange+Pink, B=Yellow+Blue, Red disconnected");
-  Serial.print("Fixed speed: ");
-  Serial.print(FIXED_STEPS_PER_SEC, 1);
-  Serial.print(" steps/s (period_us=");
-  Serial.print(PERIOD_US);
-  Serial.println(")");
-  Serial.println("Keys: a,b,r to flip coils.");
-  Serial.println();
+    stepperCoast();
 
-#elif MODE == MODE_DC
-  stopBoth();
-  printHelp();
-#endif
+    Serial.println();
+    Serial.println("=== TB6612FNG STEPPER mode ===");
+    Serial.println("Wiring: A=Orange+Pink, B=Yellow+Blue, Red disconnected");
+    Serial.print("Fixed speed: ");
+    Serial.print(FIXED_STEPS_PER_SEC, 1);
+    Serial.print(" steps/s (period_us=");
+    Serial.print(PERIOD_US);
+    Serial.println(")");
+    Serial.println("Keys: a,b,r to flip coils.");
+    Serial.println();
+  } else if (g_mode == MODE_DC) {
+    stopBoth();
+    printHelp();
+  }
 }
 
 void loop()
 {
   bgTask();
 
-#if MODE == MODE_STEPPER
-  Serial.println("Forward...");
-  runFixedForMs(true, RUN_DIR_MS);
-  stepperCoast();
+  if (g_mode == MODE_STEPPER) {
+    Serial.println("Forward...");
+    runFixedForMs(true, RUN_DIR_MS);
+    stepperCoast();
 
-  uint32_t tEnd1 = millis() + COAST_MS;
-  while ((int32_t)(millis() - tEnd1) < 0) { bgTask(); delay(0); }
+    uint32_t tEnd1 = millis() + COAST_MS;
+    while ((int32_t)(millis() - tEnd1) < 0) { bgTask(); delay(0); }
 
-  Serial.println("Reverse...");
-  runFixedForMs(false, RUN_DIR_MS);
-  stepperCoast();
+    Serial.println("Reverse...");
+    runFixedForMs(false, RUN_DIR_MS);
+    stepperCoast();
 
-  uint32_t tEnd2 = millis() + COAST_MS;
-  while ((int32_t)(millis() - tEnd2) < 0) { bgTask(); delay(0); }
-
-#elif MODE == MODE_DC
-  handleSerialDC();
-  delay(5);
-#endif
+    uint32_t tEnd2 = millis() + COAST_MS;
+    while ((int32_t)(millis() - tEnd2) < 0) { bgTask(); delay(0); }
+  } else if (g_mode == MODE_DC) {
+    handleSerialDC();
+    delay(5);
+  }
 }
