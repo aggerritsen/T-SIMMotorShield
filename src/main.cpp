@@ -3,7 +3,7 @@
 
 #define MODE_STEPPER 1
 #define MODE_DC      2
-#define MODE MODE_STEPPER
+#define MODE STEPPER
 
 #ifndef D0_GPIO_CFG
   #define D0_GPIO_CFG 3
@@ -82,6 +82,8 @@ static bool     i2c_scan_active   = false;
 static uint8_t  i2c_scan_addr     = 0x03;
 static uint8_t  i2c_scan_found    = 0;
 static uint32_t i2c_scan_start_ms = 0;
+static uint8_t  i2c_scan_runs     = 0;
+static const uint8_t I2C_SCAN_RUNS_MAX = 3;
 
 static uint32_t g_ledNextMs = 0;
 static uint8_t  g_ledIdx = 0;
@@ -119,6 +121,7 @@ static void i2c1_scan_start()
   if (!ENABLE_I2C_SCAN) return;
   if (!i2c1_initialized) return;
   if (i2c_scan_active) return;
+  if (i2c_scan_runs >= I2C_SCAN_RUNS_MAX) return;
 
   i2c_scan_active   = true;
   i2c_scan_addr     = 0x03;
@@ -154,6 +157,7 @@ static void i2c1_scan_tick()
 
     Serial.printf("  Scan duration: %lu ms\n", (unsigned long)dur);
 
+    i2c_scan_runs++;
     i2c_scan_active = false;
     return;
   }
