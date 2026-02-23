@@ -15,6 +15,8 @@ In addition, two GPIOs (**D0** and **D1**) are reserved for **status LEDs** prov
 
 The goal of this project is to provide a **clear, hardware-faithful reference** for testing motors, wiring, PWM behavior, direction control, and basic runtime liveness on ESP32-S3 hardware.
 
+![T-SIM7xxx Motor Shield PCB](doc/T-SIM7xxx-MotorShield.jpeg)
+
 ---
 
 ## Custom development PCB
@@ -28,6 +30,12 @@ This project was developed and tested on a **custom PCB** that integrates:
 
 
 ![Custom Motor Shield PCB](pcb/PCB-SM-DCM.jpg)
+
+
+Build version:
+![T-SIM Motor Shield PCB](doc/T-SIMRelayShield.jpeg)
+![T-SIM Motor Shield PCB - side view](doc/T-SIMRelayShieldSide.jpeg)
+
 
 ---
 
@@ -43,18 +51,29 @@ This project was developed and tested on a **custom PCB** that integrates:
 * **2-pin connector:** 2x JST-PH, RM2,0mm for DC motors
 * **Jumper:** Jumper Cap 2 Pins 2,54mm (VMOT selector)
 
+## Jumper settings for motor power
+
 |Jumper |VMotor (VMOT)|
 |---|---|
 | 1-2 | 3V3 from T-SIM|
 | 2-3 | DC5/VBAT from T-SIM|
 | none | External power (screw connector EXT)|
 
+
+![T-SIM Motor Shield PCB - side view](doc/T-SIMMotorShieldPower.jpeg)
+
+In this example the motor is set to use 3V3 power from the T-SIM7xxxx board.
+
+**Remove then jumper** when supplying External Power.
+
+
 ### Power notes
 
-* **VM (motor supply):** connect to your motor supply (commonly 5 V for small motors)
-* **VCC (logic):** 3.3 V from the ESP32-S3
+* **VM (motor supply):** connect to your motor supply (commonly 5 V for small motors, but 3V3 may work fine as well)
+* **VCC (logic):** 3.3 V from the T-SIM7xxxx board
 * **GND:** all grounds must be common
 * **STBY:** assumed **wired to 3.3 V** (driver always enabled)
+
 
 ---
 
