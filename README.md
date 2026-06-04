@@ -41,10 +41,11 @@ Firmware behavior:
 * GPIO43 LOW was measured as 0 V, confirming the control line works
 
 
-![Custom Motor Shield PCB](pcb/PCB-SM-DCM.jpg)
+PCB (Rev D)
+![Custom Motor Shield PCB](pcb/PCB-SM-DCM-REVD.jpg)
 
 
-Build version:
+Build version (Rev C):
 ![T-SIM Motor Shield PCB](doc/T-SIMRelayShield.jpeg)
 ![T-SIM Motor Shield PCB - side view](doc/T-SIMRelayShieldSide.jpeg)
 
@@ -57,9 +58,11 @@ Build version:
 * **Motor driver:** TB6612FNG dual H-bridge module
 * **Motor option A:** 28BYJ-48 stepper wired in bipolar-like mode
 * **Motor option B:** Two DC motors
-* **Pull-down resistors I2C:** 2x 4k7 (optional)
-* **Pull-up resistor STBY:** 1x 10k (mandatory)
-* **Electrolytic capacitor:** 10 µF/16 volt (or higher voltage depeniding on EXT power)
+* **R1, Pull-up resistor STBY:** 1x 10kΩ (mandatory)
+* **C1, Electrolytic capacitor:** 10 µF/16 volt (or higher voltage depeniding on EXT power)
+* **T1, NPN Transitor:** 1x BC337
+* **R2, Driver resistor:** 1x 1kΩ
+* **R3, Pull-down resistor:** 1x 10kΩ
 * **5-pin connector:** 1x JST-XH, RM2,5mm for steppermotor like 28BYJ-48
 * **2-pin connector:** 2x JST-PH, RM2,0mm for DC motors
 * **Jumper:** Jumper Cap 2 Pins 2,54mm (VMOT selector)
