@@ -75,8 +75,83 @@ static constexpr uint32_t I2C1_FREQ = (uint32_t)I2C1_FREQ_CFG;
 static constexpr uint32_t I2C1_FREQ = 400000;
 #endif
 
+#ifdef ENABLE_VISION_UART_CFG
+static constexpr bool ENABLE_VISION_UART = (ENABLE_VISION_UART_CFG != 0);
+#else
+static constexpr bool ENABLE_VISION_UART = false;
+#endif
+
+#ifdef USB_SERIAL_BAUD_CFG
+static constexpr uint32_t USB_SERIAL_BAUD = (uint32_t)USB_SERIAL_BAUD_CFG;
+#else
+static constexpr uint32_t USB_SERIAL_BAUD = 115200;
+#endif
+
+#ifdef VISION_UART_BAUD_CFG
+static constexpr uint32_t VISION_UART_BAUD = (uint32_t)VISION_UART_BAUD_CFG;
+#else
+static constexpr uint32_t VISION_UART_BAUD = 921600;
+#endif
+
+static constexpr bool ENABLE_VISION_UART_PERIODIC_TX = false;
+static constexpr uint32_t VISION_UART_PERIODIC_TX_MS = 2000;
+static const char *VISION_UART_PERIODIC_TX_LINE = "AT+ID?";
+
+#ifdef VISION_UART_RX_GPIO_CFG
+static constexpr int VISION_UART_RX_GPIO = (int)VISION_UART_RX_GPIO_CFG;
+#else
+static constexpr int VISION_UART_RX_GPIO = -1;
+#endif
+
+#ifdef VISION_UART_TX_GPIO_CFG
+static constexpr int VISION_UART_TX_GPIO = (int)VISION_UART_TX_GPIO_CFG;
+#else
+static constexpr int VISION_UART_TX_GPIO = -1;
+#endif
+
+#ifdef GV2_POWER_GPIO_CFG
+static constexpr int GV2_POWER_GPIO = (int)GV2_POWER_GPIO_CFG;
+#else
+static constexpr int GV2_POWER_GPIO = -1;
+#endif
+
+
+#ifdef ENABLE_UART_ONLY_CFG
+static constexpr bool ENABLE_UART_ONLY = (ENABLE_UART_ONLY_CFG != 0);
+#else
+static constexpr bool ENABLE_UART_ONLY = false;
+#endif
+static const uint8_t kVisionJpegMagic[4] = {'V', 'S', 'T', 'J'};
+static const uint8_t kVisionStateMagic[4] = {'V', 'S', 'T', 'S'};
+struct VisionJpegRxState {
+  uint8_t magic_window[4] = {0, 0, 0, 0};
+  uint8_t magic_filled = 0;
+  bool receiving_jpeg = false;
+  uint32_t jpeg_remaining = 0;
+  uint8_t frame_state = 0;
+  uint8_t frame_class_idx = 0;
+  uint8_t frame_conf_u8 = 0;
+  uint32_t frame_len = 0;
+  uint32_t image_counter = 0;
+  uint32_t last_forwarded_ms = 0;
+  bool forward_jpeg_usb = false;
+};
+struct VisionStateRxState {
+  uint8_t magic_window[4] = {0, 0, 0, 0};
+  uint8_t magic_filled = 0;
+};
 TwoWire I2Cbus1 = TwoWire(1);
 static bool i2c1_initialized = false;
+HardwareSerial VisionUART(1);
+static bool vision_uart_initialized = false;
+static uint32_t vision_uart_last_tx_ms = 0;
+static VisionJpegRxState vision_jpeg_rx;
+static VisionStateRxState vision_state_rx;
+static uint32_t vision_uart_rx_total = 0;
+static uint32_t vision_uart_last_rx_ms = 0;
+static uint32_t vision_uart_status_last_ms = 0;
+static uint8_t vision_uart_preview_count = 0;
+static bool vision_uart_preview_open = false;
 
 static bool     i2c_scan_active   = false;
 static uint8_t  i2c_scan_addr     = 0x03;
@@ -96,6 +171,141 @@ static inline void gpio_write_safe(int pin, uint8_t level)
 {
   if (pin < 0) return;
   digitalWrite(pin, level);
+}
+static bool read_u32_le_from_vision_uart(uint32_t *out_value)
+{
+  if (!out_value) return false;
+
+  uint8_t b[4];
+  for (int i = 0; i < 4; ++i)
+  {
+    const int v = VisionUART.read();
+    if (v < 0) return false;
+    b[i] = (uint8_t)v;
+  }
+
+  *out_value = ((uint32_t)b[0]) |
+               ((uint32_t)b[1] << 8) |
+               ((uint32_t)b[2] << 16) |
+               ((uint32_t)b[3] << 24);
+  return true;
+}
+
+static void vision_shift_magic_window(uint8_t *window, uint8_t *filled, uint8_t byte_value)
+{
+  if (*filled < 4)
+  {
+    window[(*filled)++] = byte_value;
+    return;
+  }
+  window[0] = window[1];
+  window[1] = window[2];
+  window[2] = window[3];
+  window[3] = byte_value;
+}
+
+static bool vision_magic_matches(const uint8_t *window, uint8_t filled, const uint8_t *magic)
+{
+  if (filled < 4) return false;
+  for (int i = 0; i < 4; ++i)
+  {
+    if (window[i] != magic[i]) return false;
+  }
+  return true;
+}
+
+static void vision_shift_magic_window(VisionJpegRxState *s, uint8_t byte_value)
+{
+  vision_shift_magic_window(s->magic_window, &s->magic_filled, byte_value);
+}
+
+static bool vision_magic_window_matches(const VisionJpegRxState &s)
+{
+  return vision_magic_matches(s.magic_window, s.magic_filled, kVisionJpegMagic);
+}
+
+static void vision_uart_preview_byte(uint8_t value)
+{
+  if (vision_uart_preview_count >= 32) return;
+
+  if (!vision_uart_preview_open)
+  {
+    Serial.print("[VISION UART] raw preview:");
+    vision_uart_preview_open = true;
+  }
+
+  Serial.print(' ');
+  if (value < 0x10) Serial.print('0');
+  Serial.print(value, HEX);
+  vision_uart_preview_count++;
+
+  if (vision_uart_preview_count >= 32)
+  {
+    Serial.println();
+    vision_uart_preview_open = false;
+  }
+}
+
+static void vision_uart_status_tick()
+{
+  if (!ENABLE_VISION_UART) return;
+  if (!vision_uart_initialized) return;
+
+  const uint32_t now = millis();
+  if ((int32_t)(now - vision_uart_status_last_ms) < 3000) return;
+  vision_uart_status_last_ms = now;
+
+  if (vision_uart_rx_total == 0)
+  {
+    Serial.printf("[VISION UART] no bytes seen yet on RX=%d TX=%d baud=%lu\n",
+                  VISION_UART_RX_GPIO,
+                  VISION_UART_TX_GPIO,
+                  (unsigned long)VISION_UART_BAUD);
+    return;
+  }
+
+  Serial.printf("[VISION UART] rx_bytes=%lu jpeg_frames=%lu last_rx_ms_ago=%lu\n",
+                (unsigned long)vision_uart_rx_total,
+                (unsigned long)vision_jpeg_rx.image_counter,
+                (unsigned long)(now - vision_uart_last_rx_ms));
+}
+
+static void vision_on_jpeg_frame_start(VisionJpegRxState *s)
+{
+  if (!s) return;
+
+  const uint32_t now = millis();
+  if (now - s->last_forwarded_ms < 500)
+  {
+    s->receiving_jpeg = true;
+    s->jpeg_remaining = s->frame_len;
+    s->forward_jpeg_usb = false;
+    Serial.print("[jpeg] drop len=");
+    Serial.print(s->frame_len);
+    Serial.print(" class=");
+    Serial.print(s->frame_class_idx);
+    Serial.print(" conf_u8=");
+    Serial.println(s->frame_conf_u8);
+    return;
+  }
+
+  s->last_forwarded_ms = now;
+  s->image_counter++;
+
+  Serial.print("recv #");
+  Serial.print(s->image_counter);
+  Serial.print(" len=");
+  Serial.print(s->frame_len);
+  Serial.print(" state=");
+  Serial.print(s->frame_state);
+  Serial.print(" class=");
+  Serial.print(s->frame_class_idx);
+  Serial.print(" conf=");
+  Serial.println((float)s->frame_conf_u8 / 255.0f, 3);
+
+  s->receiving_jpeg = true;
+  s->jpeg_remaining = s->frame_len;
+  s->forward_jpeg_usb = false;
 }
 
 static void i2c1_init_once()
@@ -173,6 +383,149 @@ static void i2c1_scan_tick()
   delay(0);
 }
 
+static void vision_uart_init_once()
+{
+  if (!ENABLE_VISION_UART) return;
+  if (vision_uart_initialized) return;
+
+  if (VISION_UART_RX_GPIO < 0 || VISION_UART_TX_GPIO < 0)
+  {
+    Serial.println("[VISION UART] pins not configured (VISION_UART_RX_GPIO_CFG / VISION_UART_TX_GPIO_CFG)");
+    return;
+  }
+
+  Serial.println("=======================================");
+  Serial.println(" VISION UART INIT");
+  Serial.println("=======================================");
+  Serial.printf(" RX=%d TX=%d baud=%lu\n",
+                VISION_UART_RX_GPIO,
+                VISION_UART_TX_GPIO,
+                (unsigned long)VISION_UART_BAUD);
+  Serial.println(" framed GV2 parser enabled");
+  Serial.println(" raw preview + RX status enabled");
+
+  VisionUART.begin(VISION_UART_BAUD, SERIAL_8N1, VISION_UART_RX_GPIO, VISION_UART_TX_GPIO);
+  vision_uart_rx_total = 0;
+  vision_uart_last_rx_ms = millis();
+  vision_uart_status_last_ms = millis();
+  vision_uart_preview_count = 0;
+  vision_uart_preview_open = false;
+  vision_uart_initialized = true;
+}
+
+static void gv2_power_enable_once()
+{
+  if (GV2_POWER_GPIO < 0) return;
+
+  pinMode(GV2_POWER_GPIO, OUTPUT);
+  digitalWrite(GV2_POWER_GPIO, HIGH);
+  Serial.print("[GV2 POWER] enable GPIO");
+  Serial.print(GV2_POWER_GPIO);
+  Serial.println("=HIGH");
+}
+
+static void vision_uart_poll()
+{
+  if (!ENABLE_VISION_UART) return;
+  if (!vision_uart_initialized) return;
+
+  while (VisionUART.available() > 0)
+  {
+    if (vision_jpeg_rx.receiving_jpeg)
+    {
+      static uint8_t buf[256];
+      const int avail_i = VisionUART.available();
+      if (avail_i <= 0) break;
+
+      uint32_t to_read = (uint32_t)avail_i;
+      if (to_read > vision_jpeg_rx.jpeg_remaining) to_read = vision_jpeg_rx.jpeg_remaining;
+      if (to_read > sizeof(buf)) to_read = sizeof(buf);
+
+      const size_t n = VisionUART.readBytes(buf, (size_t)to_read);
+      if (n == 0) break;
+
+      if (vision_jpeg_rx.forward_jpeg_usb)
+      {
+        Serial.write(buf, n);
+      }
+
+      vision_uart_rx_total += (uint32_t)n;
+      vision_uart_last_rx_ms = millis();
+      for (size_t i = 0; i < n; ++i)
+      {
+        vision_uart_preview_byte(buf[i]);
+      }
+
+      vision_jpeg_rx.jpeg_remaining -= (uint32_t)n;
+      if (vision_jpeg_rx.jpeg_remaining == 0)
+      {
+        vision_jpeg_rx.receiving_jpeg = false;
+      }
+      continue;
+    }
+
+    const int b = VisionUART.read();
+    if (b < 0) break;
+    const uint8_t value = (uint8_t)b;
+    vision_uart_rx_total++;
+    vision_uart_last_rx_ms = millis();
+    vision_uart_preview_byte(value);
+
+    vision_shift_magic_window(vision_state_rx.magic_window, &vision_state_rx.magic_filled, value);
+    if (vision_magic_matches(vision_state_rx.magic_window, vision_state_rx.magic_filled, kVisionStateMagic))
+    {
+      if (VisionUART.available() >= 1)
+      {
+        (void)VisionUART.read();
+      }
+    }
+
+    vision_shift_magic_window(&vision_jpeg_rx, value);
+    if (!vision_magic_window_matches(vision_jpeg_rx))
+    {
+      continue;
+    }
+
+    if (VisionUART.available() < 7)
+    {
+      continue;
+    }
+
+    const int st = VisionUART.read();
+    const int cls = VisionUART.read();
+    const int conf = VisionUART.read();
+    uint32_t len = 0;
+    if (st < 0 || cls < 0 || conf < 0 || !read_u32_le_from_vision_uart(&len))
+    {
+      continue;
+    }
+
+    vision_jpeg_rx.frame_state = (uint8_t)st;
+    vision_jpeg_rx.frame_class_idx = (uint8_t)cls;
+    vision_jpeg_rx.frame_conf_u8 = (uint8_t)conf;
+    vision_jpeg_rx.frame_len = len;
+
+    vision_on_jpeg_frame_start(&vision_jpeg_rx);
+  }
+}
+
+static void vision_uart_periodic_tx_tick()
+{
+  if (!ENABLE_VISION_UART) return;
+  if (!vision_uart_initialized) return;
+  if (!ENABLE_VISION_UART_PERIODIC_TX) return;
+
+  uint32_t now = millis();
+  if ((int32_t)(now - vision_uart_last_tx_ms) < (int32_t)VISION_UART_PERIODIC_TX_MS)
+    return;
+
+  vision_uart_last_tx_ms = now;
+  VisionUART.print(VISION_UART_PERIODIC_TX_LINE);
+  VisionUART.print("\r\n");
+  Serial.print("[VISION TX] ");
+  Serial.println(VISION_UART_PERIODIC_TX_LINE);
+}
+
 static void blink_init()
 {
   if (PIN_LED0 >= 0) pinMode(PIN_LED0, OUTPUT);
@@ -209,6 +562,9 @@ static inline void bgTask()
 {
   blink_tick();
   i2c1_scan_tick();
+  vision_uart_periodic_tx_tick();
+  vision_uart_poll();
+  vision_uart_status_tick();
 }
 
 static const int PWM_FREQ_HZ = 20000;
@@ -430,7 +786,7 @@ static void waitForModeSelection()
 
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(USB_SERIAL_BAUD);
   delay(2500);
 
   Serial.println();
@@ -450,12 +806,25 @@ void setup()
   pwmInit();
 
   blink_init();
+  gv2_power_enable_once();
   i2c1_init_once();
+  vision_uart_init_once();
 
-  printModePrompt();
-  waitForModeSelection();
+  if (ENABLE_UART_ONLY) {
+    stopBoth();
+    Serial.println();
+    Serial.println("=== UART-only bring-up mode ===");
+    Serial.println("Mode prompt and motor controls are disabled.");
+    Serial.print("Vision UART RX=GPIO");
+    Serial.print(VISION_UART_RX_GPIO);
+    Serial.print(" TX=GPIO");
+    Serial.println(VISION_UART_TX_GPIO);
+  } else {
+    printModePrompt();
+    waitForModeSelection();
+  }
 
-  if (g_mode == MODE_STEPPER) {
+  if (!ENABLE_UART_ONLY && g_mode == MODE_STEPPER) {
     pwmWriteA(255);
     pwmWriteB(255);
 
@@ -471,7 +840,7 @@ void setup()
     Serial.println(")");
     Serial.println("Keys: a,b,r to flip coils.");
     Serial.println();
-  } else if (g_mode == MODE_DC) {
+  } else if (!ENABLE_UART_ONLY && g_mode == MODE_DC) {
     stopBoth();
     printHelp();
   }
@@ -481,7 +850,9 @@ void loop()
 {
   bgTask();
 
-  if (g_mode == MODE_STEPPER) {
+  if (ENABLE_UART_ONLY) {
+    delay(5);
+  } else if (g_mode == MODE_STEPPER) {
     Serial.println("Forward...");
     runFixedForMs(true, RUN_DIR_MS);
     stepperCoast();
@@ -495,7 +866,7 @@ void loop()
 
     uint32_t tEnd2 = millis() + COAST_MS;
     while ((int32_t)(millis() - tEnd2) < 0) { bgTask(); delay(0); }
-  } else if (g_mode == MODE_DC) {
+  } else if (!ENABLE_UART_ONLY && g_mode == MODE_DC) {
     handleSerialDC();
     delay(5);
   }

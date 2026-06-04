@@ -3,6 +3,7 @@
 This repository contains a clean, deterministic GPIO + I2C baseline used to validate pinout consistency and external bus behavior across LilyGO T-SIM boards when used with a generic **T-SIM Motor driver Shield**, to be used by either a Stepper Motor or two DC motors using the **TB6612FNG** Motor Driver.
 
 The shield also provides a male header connector for the XIAO slot of the Seeed Grove Vision AI V2 board.
+On the newer PCB revision, the Grove Vision AI V2 ground path is switched by GPIO43 on the fifth pin. The firmware drives GPIO43 HIGH during boot to enable the module before UART initialization.
 
 The focus of this development is hardware correctness and repeatability, not application logic. It provides a proven foundation for later integration of actuators (relays, DC or stepper motors) and external I2C peripherals (sensors, expanders, AI modules).
 
@@ -27,6 +28,17 @@ This project was developed and tested on a **custom PCB** that integrates:
 * TB6612FNG motor driver
 * Dedicated motor connectors
 * Common ground and power routing for VM / VCC
+
+### Grove Vision AI V2 power enable
+
+The newer PCB revision no longer powers the Grove Vision AI V2 directly. Its ground path is switched by the fifth connector pin, controlled from **GPIO43**.
+
+Firmware behavior:
+
+* `GV2_POWER_GPIO_CFG=43` selects the enable pin for the T-SIM7080G-S3 build
+* GPIO43 is configured as an output during boot
+* GPIO43 is driven **HIGH** before the Vision UART is initialized
+* GPIO43 LOW was measured as 0 V, confirming the control line works
 
 
 ![Custom Motor Shield PCB](pcb/PCB-SM-DCM.jpg)
