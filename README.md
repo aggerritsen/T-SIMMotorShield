@@ -45,9 +45,9 @@ PCB (Rev D)
 ![Custom Motor Shield PCB](pcb/PCB-SM-DCM-REVD.jpg)
 
 
-Build version (Rev C):
-![T-SIM Motor Shield PCB](doc/T-SIMRelayShield.jpeg)
-![T-SIM Motor Shield PCB - side view](doc/T-SIMRelayShieldSide.jpeg)
+Build version (Rev D):
+![T-SIM Motor Shield PCB](doc/T-SIMRelayShieldRevD.jpeg)
+![T-SIM Motor Shield PCB - side view](doc/T-SIMRelayShieldSideRevD.jpeg)
 
 
 ---
